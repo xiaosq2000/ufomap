@@ -290,7 +290,7 @@ void Server::publishInfo()
 	}
 }
 
-void Server::mapConnectCallback(ros::SingleSubscriberPublisher const &pub, int depth)
+void Server::mapConnectCallback(ros::SingleSubscriberPublisher const &pub, unsigned int depth)
 {
 	// When a new node subscribes we will publish the whole map to that node.
 
@@ -403,7 +403,7 @@ void Server::timerCallback(ros::TimerEvent const &event)
 	header.frame_id = frame_id_;
 
 	if (!map_pub_.empty()) {
-		for (int i = 0; i < map_pub_.size(); ++i) {
+		for (unsigned int i = 0; i < map_pub_.size(); ++i) {
 			if (map_pub_[i] &&
 			    (0 < map_pub_[i].getNumSubscribers() || map_pub_[i].isLatched())) {
 				std::visit(

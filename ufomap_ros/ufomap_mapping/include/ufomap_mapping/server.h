@@ -76,7 +76,7 @@ class Server
 
 	void publishInfo();
 
-	void mapConnectCallback(ros::SingleSubscriberPublisher const &pub, int depth);
+	void mapConnectCallback(ros::SingleSubscriberPublisher const &pub, unsigned int depth);
 
 	bool getMapCallback(ufomap_srvs::GetMap::Request &request,
 	                    ufomap_srvs::GetMap::Response &response);
