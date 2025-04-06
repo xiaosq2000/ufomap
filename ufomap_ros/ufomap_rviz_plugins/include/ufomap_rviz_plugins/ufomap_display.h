@@ -131,7 +131,8 @@ class UFOMapDisplay : public rviz::Display
 
 	void updateBBX();
 
-	void updateReset();
+    // TODO:
+	// void updateReset();
 
  protected:
 	virtual void onEnable() override;
