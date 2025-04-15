@@ -260,7 +260,10 @@ void Server::publishInfo()
 		diagnostic_msgs::DiagnosticStatus msg;
 		msg.level = diagnostic_msgs::DiagnosticStatus::OK;
 		msg.name = "UFOMap mapping timings";
-		msg.values.resize(12);
+
+		msg.values.resize(16);
+
+		// timing metrics
 		msg.values[0].key = "Min integration time (ms)";
 		msg.values[0].value = std::to_string(min_integration_time_);
 		msg.values[1].key = "Max integration time (ms)";
@@ -286,11 +289,41 @@ void Server::publishInfo()
 		msg.values[10].value = std::to_string(max_whole_time_);
 		msg.values[11].key = "Average whole time (ms)";
 		msg.values[11].value = std::to_string(accumulated_whole_time_ / num_wholes_);
+
+		// memory metrics
+		std::size_t memory_usage = 0;
+		std::size_t num_leaf_nodes = 0;
+		std::size_t num_inner_nodes = 0;
+
+		std::visit(
+		    [&memory_usage, &num_leaf_nodes, &num_inner_nodes](auto &&map) {
+			    using T = std::decay_t<decltype(map)>;
+			    if constexpr (!std::is_same_v<T, std::monostate>) {
+				    memory_usage = map.memoryUsage();
+				    num_leaf_nodes = map.getNumLeafNodes();
+				    num_inner_nodes = map.getNumInnerNodes();
+			    }
+		    },
+		    map_);
+
+		msg.values[12].key = "Memory usage (bytes)";
+		msg.values[12].value = std::to_string(memory_usage);
+
+		msg.values[13].key = "Memory usage (MB)";
+		msg.values[13].value = std::to_string(memory_usage / (1024.0 * 1024.0));
+
+		msg.values[14].key = "Number of leaf nodes";
+		msg.values[14].value = std::to_string(num_leaf_nodes);
+
+		msg.values[15].key = "Number of inner nodes";
+		msg.values[15].value = std::to_string(num_inner_nodes);
+
 		info_pub_.publish(msg);
 	}
 }
 
-void Server::mapConnectCallback(ros::SingleSubscriberPublisher const &pub, unsigned int depth)
+void Server::mapConnectCallback(ros::SingleSubscriberPublisher const &pub,
+                                unsigned int depth)
 {
 	// When a new node subscribes we will publish the whole map to that node.
 
