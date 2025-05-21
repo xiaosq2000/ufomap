@@ -457,7 +457,7 @@ class OccupancyMapBase : public Octree<DATA_TYPE, OccupancyMapInnerNode<DATA_TYP
 		direction.normalize();
 		Point3 end = origin + (direction * max_range);
 
-		if (!Base::moveLineIntoBBX(origin, end)) {
+		if (!Base::moveLineInside(origin, end)) {
 			// Line fully outside of octree bounds
 			return std::nullopt;
 		}
@@ -482,7 +482,11 @@ class OccupancyMapBase : public Octree<DATA_TYPE, OccupancyMapInnerNode<DATA_TYP
 			current_code = Base::toCode(current);
 		}
 
-		return isOccupied(current_code) ? current_code : std::nullopt;
+        if (isOccupied(current_code)) {
+            return current_code; // This will implicitly convert to std::optional<ufo::map::Code>
+        } else {
+            return std::nullopt; // This will implicitly convert to std::optional<ufo::map::Code>
+        }
 	}
 
 	//
