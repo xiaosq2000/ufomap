@@ -60,17 +60,19 @@ struct Frustum {
 	Frustum(Frustum const& frustum) : planes(frustum.planes) {}
 
 	// TODO: Horizontal or vertical angle?
-	Frustum(Point const& pos, Point const& target, Point const& up, double vertical_angle,
-	        double horizontal_angle, double near_distance, double far_distance)
+	Frustum(Point const& pos, Point const& target, Point const& up,
+	        double vertical_angle_rad, double horizontal_angle_rad, double near_distance,
+	        double far_distance)
 	{
-		double ratio = horizontal_angle / vertical_angle;
+		double ratio = horizontal_angle_rad / vertical_angle_rad;
 
-		// TODO: Check if correct
-		double tang = tan(vertical_angle * 0.5);
-		double near_height = near_distance * tang;
-		double near_width = near_height * ratio;
-		double far_height = far_distance * tang;
-		double far_width = far_height * ratio;
+		double tang_v = std::tan(vertical_angle_rad * 0.5);
+		double tang_h = std::tan(horizontal_angle_rad * 0.5);
+
+		double near_height = near_distance * tang_v;
+		double near_width = near_distance * tang_h;
+		double far_height = far_distance * tang_v;
+		double far_width = far_distance * tang_h;
 
 		Point Z = pos - target;
 		Z.normalize();
