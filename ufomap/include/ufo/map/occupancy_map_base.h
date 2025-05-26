@@ -451,7 +451,7 @@ class OccupancyMapBase : public Octree<DATA_TYPE, OccupancyMapInnerNode<DATA_TYP
 	                            DepthType depth = 0) const
 	{
 		if (0 > max_range) {
-			max_range = Base::getMin().distance(Base::getMin());
+			max_range = Base::getMin().distance(Base::getMax());
 		}
 
 		direction.normalize();
