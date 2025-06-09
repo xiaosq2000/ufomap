@@ -46,6 +46,8 @@
 
 namespace ufo::geometry
 {
+// Epsilon for floating-point comparisons
+constexpr double EPSILON = 1e-10;
 /////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////// Help functions
 ////////////////////////////////////////
@@ -56,7 +58,7 @@ bool intersectsLine(const AABB& aabb, const Ray& ray, double t_near, double t_fa
 	Point max = aabb.getMax();
 
 	for (int i = 0; i < 3; ++i) {
-		if (0 != ray.direction[i]) {
+		if (std::abs(ray.direction[i]) > EPSILON) {
 			double reciprocal_direction = 1.0 / ray.direction[i];
 			double t1 = (min[i] - ray.origin[i]) * reciprocal_direction;
 			double t2 = (max[i] - ray.origin[i]) * reciprocal_direction;
@@ -158,19 +160,31 @@ double classify(const AABB& aabb, const Plane& plane)
 
 double classify(const OBB& obb, const Plane& plane)
 {
-	// TODO: Implement
-	throw std::logic_error("Function not yet implemented");
-	// Point normal = plane.normal * obb.rotation;
-	// double r = std::abs(obb.half_size.x() * normal.x()) +
-	//            std::abs(obb.half_size.y() * normal.y()) +
-	//            std::abs(obb.half_size.z() * normal.z());
-	// double d = Point::dot(plane.normal, obb.center) + plane.distance;
-	// if (std::abs(d) < r) {
-	// 	return 0.0f;
-	// } else if (d < 0.0f) {
-	// 	return d + r;
-	// }
-	// return d - r;
+	// Get rotation matrix
+	std::vector<double> obb_rot_matrix;
+	obb.rotation.toRotMatrix(obb_rot_matrix);
+	
+	// Transform plane normal to OBB's local coordinate system
+	Point local_normal(
+		plane.normal.x() * obb_rot_matrix[0] + plane.normal.y() * obb_rot_matrix[1] + plane.normal.z() * obb_rot_matrix[2],
+		plane.normal.x() * obb_rot_matrix[3] + plane.normal.y() * obb_rot_matrix[4] + plane.normal.z() * obb_rot_matrix[5],
+		plane.normal.x() * obb_rot_matrix[6] + plane.normal.y() * obb_rot_matrix[7] + plane.normal.z() * obb_rot_matrix[8]
+	);
+	
+	// Compute the projection radius
+	double r = std::abs(obb.half_size.x() * local_normal.x()) +
+	           std::abs(obb.half_size.y() * local_normal.y()) +
+	           std::abs(obb.half_size.z() * local_normal.z());
+	
+	// Distance from OBB center to plane
+	double d = Point::dot(plane.normal, obb.center) - plane.distance;
+	
+	if (std::abs(d) < r) {
+		return 0.0;  // Intersecting
+	} else if (d < 0.0) {
+		return d + r;  // Negative side
+	}
+	return d - r;  // Positive side
 }
 
 std::pair<double, double> getInterval(const AABB& aabb, const Point& axis)
@@ -207,9 +221,9 @@ std::pair<double, double> getInterval(const OBB& obb, const Point& axis)
 
 	Point A[] = {
 	    // OBB Axis
-	    Point(obb_rot_matrix[0], obb_rot_matrix[1], obb_rot_matrix[2]),
-	    Point(obb_rot_matrix[3], obb_rot_matrix[4], obb_rot_matrix[5]),
-	    Point(obb_rot_matrix[6], obb_rot_matrix[7], obb_rot_matrix[8]),
+	    Point(obb_rot_matrix[0], obb_rot_matrix[3], obb_rot_matrix[6]), // X-axis
+	    Point(obb_rot_matrix[1], obb_rot_matrix[4], obb_rot_matrix[7]), // Y-axis
+	    Point(obb_rot_matrix[2], obb_rot_matrix[5], obb_rot_matrix[8]), // Z-axis
 	};
 
 	vertex[0] = C + A[0] * E[0] + A[1] * E[1] + A[2] * E[2];
@@ -300,9 +314,10 @@ bool intersects(const AABB& aabb, const OBB& obb)
 	Point test[15] = {Point(1, 0, 0),  // AABB axis 1
 	                  Point(0, 1, 0),  // AABB axis 2
 	                  Point(0, 0, 1),  // AABB axis 3
-	                  Point(obb_rot_matrix[0], obb_rot_matrix[1], obb_rot_matrix[2]),
-	                  Point(obb_rot_matrix[3], obb_rot_matrix[4], obb_rot_matrix[5]),
-	                  Point(obb_rot_matrix[6], obb_rot_matrix[7], obb_rot_matrix[8])};
+	                  Point(obb_rot_matrix[0], obb_rot_matrix[3], obb_rot_matrix[6]), // OBB X-axis
+	                  Point(obb_rot_matrix[1], obb_rot_matrix[4], obb_rot_matrix[7]), // OBB Y-axis
+	                  Point(obb_rot_matrix[2], obb_rot_matrix[5], obb_rot_matrix[8])  // OBB Z-axis
+	                 };
 
 	for (int i = 0; i < 3; ++i) {  // Fill out rest of axis
 		test[6 + i * 3 + 0] = Point::cross(test[i], test[3]);
@@ -440,15 +455,20 @@ bool intersects(const LineSegment& line_segment, const OBB& obb)
 	if (line_length_squared < 0.0000001f) {
 		return intersects(obb, line_segment.start);
 	}
-	ray.direction /= line_length_squared;  // Normalize
+	double line_length = std::sqrt(line_length_squared);
+	ray.direction /= line_length;  // Normalize
 
 	// Begin ray casting
 
 	Point p = obb.center - ray.origin;
 
-	Point X(obb.rotation[0], 0, 0);
-	Point Y(0, obb.rotation[1], 0);
-	Point Z(0, 0, obb.rotation[2]);
+	// Get rotation matrix to extract axes
+	std::vector<double> obb_rot_matrix;
+	obb.rotation.toRotMatrix(obb_rot_matrix);
+	
+	Point X(obb_rot_matrix[0], obb_rot_matrix[3], obb_rot_matrix[6]);
+	Point Y(obb_rot_matrix[1], obb_rot_matrix[4], obb_rot_matrix[7]);
+	Point Z(obb_rot_matrix[2], obb_rot_matrix[5], obb_rot_matrix[8]);
 
 	Point f(Point::dot(X, ray.direction), Point::dot(Y, ray.direction),
 	        Point::dot(Z, ray.direction));
@@ -457,12 +477,12 @@ bool intersects(const LineSegment& line_segment, const OBB& obb)
 
 	double t[6] = {0, 0, 0, 0, 0, 0};
 	for (int i = 0; i < 3; ++i) {
-		if (0.0 == f[i])  // TODO: Should be approximate equal
+		if (std::abs(f[i]) < EPSILON)
 		{
 			if (-e[i] - obb.half_size[i] > 0 || -e[i] + obb.half_size[i] < 0) {
 				return false;
 			}
-			f[i] = 0.00001f;  // Avoid div by 0!
+			f[i] = EPSILON;  // Avoid div by 0!
 		}
 		t[i * 2 + 0] = (e[i] + obb.half_size[i]) / f[i];  // tmin[x, y, z]
 		t[i * 2 + 1] = (e[i] - obb.half_size[i]) / f[i];  // tmax[x, y, z]
@@ -492,7 +512,7 @@ bool intersects(const LineSegment& line_segment, const OBB& obb)
 	}
 
 	// End ray casting
-	return t_result >= 0 && t_result * t_result <= line_length_squared;
+	return t_result >= 0 && t_result <= line_length;
 }
 
 bool intersects(const LineSegment& line_segment, const Plane& plane)
@@ -500,7 +520,7 @@ bool intersects(const LineSegment& line_segment, const Plane& plane)
 	Point ab = line_segment.end - line_segment.start;
 	double n_A = Point::dot(plane.normal, line_segment.start);
 	double n_AB = Point::dot(plane.normal, ab);
-	if (0.0 == n_AB)  // TODO: Almost equal?
+	if (std::abs(n_AB) < EPSILON)
 	{
 		return false;
 	}
@@ -512,7 +532,7 @@ bool intersects(const LineSegment& line_segment, const Point& point)
 {
 	Point closest_point = closestPoint(line_segment, point);
 	double distance_squared = (closest_point - point).squaredNorm();
-	return 0.0 == distance_squared;  // TODO: Almost equal?
+	return distance_squared < EPSILON * EPSILON;
 }
 
 bool intersects(const LineSegment& line_segment, const Ray& ray)
@@ -557,9 +577,9 @@ bool intersects(const OBB& obb_1, const OBB& obb_2)
 	                  Point(obb_2_rot_matrix[6], obb_2_rot_matrix[7], obb_2_rot_matrix[8])};
 
 	for (int i = 0; i < 3; ++i) {  // Fill out rest of axis
-		test[6 + i * 3 + 0] = Point::cross(test[i], test[0]);
-		test[6 + i * 3 + 1] = Point::cross(test[i], test[1]);
-		test[6 + i * 3 + 2] = Point::cross(test[i], test[2]);
+		test[6 + i * 3 + 0] = Point::cross(test[i], test[3]);
+		test[6 + i * 3 + 1] = Point::cross(test[i], test[4]);
+		test[6 + i * 3 + 2] = Point::cross(test[i], test[5]);
 	}
 
 	for (int i = 0; i < 15; ++i) {
@@ -573,38 +593,44 @@ bool intersects(const OBB& obb_1, const OBB& obb_2)
 
 bool intersects(const OBB& obb, const Plane& plane)
 {
-	Point rot[] = {
-	    Point(obb.rotation[0], 0, 0),
-	    Point(0, obb.rotation[1], 0),
-	    Point(0, 0, obb.rotation[2]),
+	// Get rotation matrix
+	std::vector<double> obb_rot_matrix;
+	obb.rotation.toRotMatrix(obb_rot_matrix);
+	
+	// Extract OBB axes
+	Point axes[3] = {
+	    Point(obb_rot_matrix[0], obb_rot_matrix[3], obb_rot_matrix[6]),
+	    Point(obb_rot_matrix[1], obb_rot_matrix[4], obb_rot_matrix[7]),
+	    Point(obb_rot_matrix[2], obb_rot_matrix[5], obb_rot_matrix[8])
 	};
-	Point normal = plane.normal;
 
-	// Project the half extents of the AABB onto the plane normal
-	double p_len = obb.half_size.x() * std::fabs(Point::dot(normal, rot[0])) +
-	               obb.half_size.y() * std::fabs(Point::dot(normal, rot[1])) +
-	               obb.half_size.z() * std::fabs(Point::dot(normal, rot[2]));
+	// Project the half extents of the OBB onto the plane normal
+	double p_len = obb.half_size.x() * std::abs(Point::dot(plane.normal, axes[0])) +
+	               obb.half_size.y() * std::abs(Point::dot(plane.normal, axes[1])) +
+	               obb.half_size.z() * std::abs(Point::dot(plane.normal, axes[2]));
+	
 	// Find the distance from the center of the OBB to the plane
 	double distance = Point::dot(plane.normal, obb.center) - plane.distance;
-	// Intersection occurs if the distance falls within the projected side
-	return std::fabs(distance) <= p_len;
+	
+	// Intersection occurs if the distance falls within the projected radius
+	return std::abs(distance) <= p_len;
 }
 
 bool intersects(const OBB& obb, const Point& point)
 {
-	// TODO: Implement look earlier. THIS IS WRONG!
-	Point dir = point - obb.center;
+	// Transform point to OBB's local coordinate system
+	Point local_point = point - obb.center;
+	
+	// Get rotation matrix (column-major)
 	std::vector<double> obb_rot_matrix;
 	obb.rotation.toRotMatrix(obb_rot_matrix);
+	
+	// Check if point is inside OBB by projecting onto each axis
 	for (int i = 0; i < 3; ++i) {
-		Point axis(obb_rot_matrix[i * 3], obb_rot_matrix[i * 3 + 1],
-		           obb_rot_matrix[i * 3 + 2]);
-		double distance = Point::dot(dir, axis);
+		// Extract axis as column vector
+		Point axis(obb_rot_matrix[i], obb_rot_matrix[i + 3], obb_rot_matrix[i + 6]);
+		double distance = std::abs(Point::dot(local_point, axis));
 		if (distance > obb.half_size[i]) {
-			return false;
-		}
-		if (distance < -obb.half_size[i])  // TODO: Should this be else if?
-		{
 			return false;
 		}
 	}
@@ -615,9 +641,13 @@ bool intersects(const OBB& obb, const Ray& ray)
 {
 	Point p = obb.center - ray.origin;
 
-	Point X(obb.rotation[0], 0, 0);
-	Point Y(0, obb.rotation[1], 0);
-	Point Z(0, 0, obb.rotation[2]);
+	// Get rotation matrix to extract axes
+	std::vector<double> obb_rot_matrix;
+	obb.rotation.toRotMatrix(obb_rot_matrix);
+	
+	Point X(obb_rot_matrix[0], obb_rot_matrix[3], obb_rot_matrix[6]);
+	Point Y(obb_rot_matrix[1], obb_rot_matrix[4], obb_rot_matrix[7]);
+	Point Z(obb_rot_matrix[2], obb_rot_matrix[5], obb_rot_matrix[8]);
 
 	Point f(Point::dot(X, ray.direction), Point::dot(Y, ray.direction),
 	        Point::dot(Z, ray.direction));
@@ -626,12 +656,12 @@ bool intersects(const OBB& obb, const Ray& ray)
 
 	double t[6] = {0, 0, 0, 0, 0, 0};
 	for (int i = 0; i < 3; ++i) {
-		if (0.0 == f[i])  // TODO: Should be approximate equal?
+		if (std::abs(f[i]) < EPSILON)
 		{
 			if (-e[i] - obb.half_size[i] > 0 || -e[i] + obb.half_size[i] < 0) {
 				return false;
 			}
-			f[i] = 0.00001f;  // Avoid div by 0!
+			f[i] = EPSILON;  // Avoid div by 0!
 		}
 
 		t[i * 2 + 0] = (e[i] + obb.half_size[i]) / f[i];  // tmin[x, y, z]
@@ -680,7 +710,7 @@ bool intersects(const Plane& plane, const OBB& obb) { return intersects(obb, pla
 bool intersects(const Plane& plane_1, const Plane& plane_2)
 {
 	Point d = Point::cross(plane_1.normal, plane_2.normal);
-	return 0.0 != Point::dot(d, d);  // TODO: Almost not equal?
+	return Point::dot(d, d) > EPSILON * EPSILON;
 }
 
 bool intersects(const Plane& plane, const Point& point)
@@ -728,7 +758,7 @@ bool intersects(const Point& point, const Plane& plane)
 
 bool intersects(const Point& point_1, const Point& point_2)
 {
-	return point_1 == point_2;  // TODO: Almost equal?
+	return (point_1 - point_2).squaredNorm() < EPSILON * EPSILON;
 }
 
 bool intersects(const Point& point, const Ray& ray)
@@ -738,7 +768,7 @@ bool intersects(const Point& point, const Ray& ray)
 	}
 	Point direction = point - ray.origin;
 	direction.normalize();
-	return 1.0 == Point::dot(direction, ray.direction);  // TODO: Almost equal?
+	return std::abs(Point::dot(direction, ray.direction) - 1.0) < EPSILON;
 }
 
 bool intersects(const Point& point, const Sphere& sphere)

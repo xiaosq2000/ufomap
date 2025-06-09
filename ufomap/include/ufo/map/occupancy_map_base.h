@@ -48,6 +48,7 @@
 #include <ufo/map/octree.h>
 #include <ufo/map/point_cloud.h>
 #include <ufo/map/types.h>
+#include <mutex>
 
 namespace ufo::map
 {
@@ -292,8 +293,11 @@ class OccupancyMapBase : public Octree<DATA_TYPE, OccupancyMapInnerNode<DATA_TYP
 			if (0 > max_range || distance <= max_range) {
 				// Occupied space
 				Code end_code = Base::toCode(end);
-				if (indices_.insert(end_code).second) {
-					occupied_hits.push_back(std::make_pair(end_code, prob_hit_log_));
+				{
+					std::lock_guard<std::mutex> lock(indices_mutex_);
+					if (indices_.insert(end_code).second) {
+						occupied_hits.push_back(std::make_pair(end_code, prob_hit_log_));
+					}
 				}
 			} else {
 				direction /= distance;
@@ -310,7 +314,10 @@ class OccupancyMapBase : public Octree<DATA_TYPE, OccupancyMapInnerNode<DATA_TYP
 
 		LogitType prob_miss_log = prob_miss_log_ / double((2.0 * depth) + 1);
 
-		indices_.clear();
+		{
+			std::lock_guard<std::mutex> lock(indices_mutex_);
+			indices_.clear();
+		}
 
 		insertPointCloudWait();
 
@@ -1553,8 +1560,9 @@ class OccupancyMapBase : public Octree<DATA_TYPE, OccupancyMapInnerNode<DATA_TYP
 	Point3 max_change_;
 
 	// Defined here for speedup
+	mutable std::mutex indices_mutex_;
 	CodeSet indices_;
-	std::future<void> integrate_;
+	mutable std::future<void> integrate_;
 
 	template <typename T, typename D, typename I, typename L, bool O>
 	friend class OccupancyMapIterator;
