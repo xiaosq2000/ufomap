@@ -10,36 +10,30 @@
 
 using namespace ufo;
 
-TEST_CASE("Integrate Points")
+TEST_CASE("Integrator inserts hits and carves free space")
 {
-	Integrator                    integrator_;
-	Map3D<OccupancyMap, ColorMap> map(0.5, 3);
+	Integrator<3>                 integrator;
+	Map3D<OccupancyMap, ColorMap> map(0.1, 16);
 	PointCloud<3, float, Color>   cloud;
 
-	cloud.emplace_back(Vec3f(0, 0, 0), Color(40, 50, 60));
-	// std::cout << "cloud size: " << cloud.size() << std::endl;
-	// std::cout << "cloud color: " << cloud[0].get<Color>() << std::endl;
+	// A single measurement 1 m in front of a sensor placed at the origin.
+	cloud.emplace_back(Vec3f(1.0f, 0.0f, 0.0f), Color(40, 50, 60));
 
-	std::cout << "occupancy before:  " << map.occupancy(Vec3f(0, 0, 0)) << std::endl;
-	std::cout << "color before:  " << map.color(Vec3f(0, 0, 0)) << std::endl;
+	integrator.occupancy_hit  = 0.7f;
+	integrator.occupancy_miss = 0.4f;
+	integrator.propagate      = true;
 
-	// std::cout << "map size: " << map.size() << std::endl;
-	// integrator_.occupancy_hit = 0.9f;
-	integrator_.insertPoints(execution::seq, map, cloud, false);
+	// Identity transform -> cloud already in the map frame, sensor at the origin.
+	integrator(execution::seq, map, cloud);
 
-	// std::cout << "map size:  " << map.size() << std::endl;
-	map.propagateModified();
+	// The measured point is occupied (and not free).
+	REQUIRE(map.containsOccupied(Vec3f(1.0f, 0.0f, 0.0f)));
+	REQUIRE_FALSE(map.containsFree(Vec3f(1.0f, 0.0f, 0.0f)));
 
-	std::cout << "occupancy d=0:  " << map.occupancy(Vec3f(0, 0, 0)) << std::endl;
-	std::cout << "occupancy d=1:  " << map.occupancy(TreeCoord{Vec3f(0, 0, 0), 1}) << std::endl;
+	// The space between the sensor and the point has been carved free.
+	REQUIRE(map.containsFree(Vec3f(0.5f, 0.0f, 0.0f)));
+	REQUIRE_FALSE(map.containsOccupied(Vec3f(0.5f, 0.0f, 0.0f)));
 
-	std::cout << "color d=0:  " << map.color(TreeCoord{Vec3f(0, 0, 0), 0}) << std::endl;
-	std::cout << "color d=1:  " << map.color(TreeCoord{Vec3f(0, 0, 0), 1}) << std::endl;
-
-	for (auto n : map) {
-		std::cout << "n: " << n << ", modified: " << map.modified(n) << std::endl;
-	}
-
-	// std::filesystem::path path("/home/ramona/Desktop/ufomap.dot");
-	// map.saveDotFile(path);
+	// Space beyond the measured point was never observed -> still unknown.
+	REQUIRE(map.containsUnknown(Vec3f(3.0f, 0.0f, 0.0f)));
 }

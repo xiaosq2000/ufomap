@@ -44,6 +44,7 @@
 
 // UFO
 #include <ufo/cloud/point_cloud.hpp>
+#include <ufo/container/tree/code.hpp>
 #include <ufo/container/tree/coord.hpp>
 #include <ufo/container/tree/index.hpp>
 #include <ufo/core/label.hpp>
@@ -67,15 +68,19 @@
 #include <ufo/utility/type_traits.hpp>
 
 // STL
+#include <cmath>
 #include <cstddef>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace ufo
 {
 enum class DownSamplingMethod { NONE, FIRST, CENTER };
 
-template <std::size_t Dim>
+template <std::size_t Dim = 3>
 class Integrator
 {
  public:
@@ -115,20 +120,82 @@ class Integrator
 	bool reset_modified = true;
 
  public:
+	/*!
+	 * @brief Integrate a point cloud into `map` (sequential).
+	 *
+	 * Every point becomes an occupied "hit" and the free space between the sensor
+	 * origin and each point is carved as "misses". `transform` is the sensor pose in
+	 * the map frame: its translation is the sensor origin and its rotation brings the
+	 * (sensor-frame) cloud into the map frame. A default-constructed `transform` is
+	 * treated as identity -- the cloud is assumed to already be in the map frame with
+	 * the sensor at the origin.
+	 */
 	template <class Map, class T, class... Rest>
 	void operator()(Map& map, PointCloud<Dim, T, Rest...> cloud,
 	                Transform<Dim, T> const& transform = {}) const
 	{
-		// TODO: Implement
+		Vec<Dim, T> const sensor_origin = transform.translation;
+		if (Transform<Dim, T>{} != transform) {
+			transformInPlace(transform, cloud);
+		}
+
+		auto misses = buildMisses(map, cloud, Vec<Dim, float>(sensor_origin));
+
+		insertHits(map, cloud);
+		if (!misses.empty()) {
+			insertMisses(map, misses);
+		}
+
+		if (propagate) {
+			map.propagate();
+		}
 	}
 
+	/*!
+	 * @brief Integrate a point cloud into `map` using the given execution policy.
+	 *
+	 * @see operator()(Map&, PointCloud, Transform const&) const
+	 */
 	template <
 	    class ExecutionPolicy, class Map, class T, class... Rest,
 	    std::enable_if_t<execution::is_execution_policy_v<ExecutionPolicy>, bool> = true>
 	void operator()(ExecutionPolicy&& policy, Map& map, PointCloud<Dim, T, Rest...> cloud,
 	                Transform<Dim, T> const& transform = {}) const
 	{
-		// TODO: Implement
+		Vec<Dim, T> const sensor_origin = transform.translation;
+		if (Transform<Dim, T>{} != transform) {
+			transformInPlace(policy, transform, cloud);
+		}
+
+		auto misses = buildMisses(map, cloud, Vec<Dim, float>(sensor_origin));
+
+		insertHits(policy, map, cloud);
+		if (!misses.empty()) {
+			insertMisses(policy, map, misses);
+		}
+
+		if (propagate) {
+			map.propagate(policy);
+		}
+	}
+
+	/*!
+	 * @brief Named alias for `operator()` -- integrate a point cloud into `map`.
+	 */
+	template <class Map, class T, class... Rest>
+	void insertPoints(Map& map, PointCloud<Dim, T, Rest...> cloud,
+	                  Transform<Dim, T> const& transform = {}) const
+	{
+		(*this)(map, std::move(cloud), transform);
+	}
+
+	template <
+	    class ExecutionPolicy, class Map, class T, class... Rest,
+	    std::enable_if_t<execution::is_execution_policy_v<ExecutionPolicy>, bool> = true>
+	void insertPoints(ExecutionPolicy&& policy, Map& map, PointCloud<Dim, T, Rest...> cloud,
+	                  Transform<Dim, T> const& transform = {}) const
+	{
+		(*this)(std::forward<ExecutionPolicy>(policy), map, std::move(cloud), transform);
 	}
 
  protected:
@@ -223,6 +290,64 @@ class Integrator
 	|                                       Misses                                        |
 	|                                                                                     |
 	**************************************************************************************/
+
+	/*!
+	 * @brief Ray-cast from `sensor_origin` to each point and collect the traversed
+	 * free-space voxels at `miss_depth`.
+	 *
+	 * Voxels that contain a measured point are never carved. Uses uniform sampling at
+	 * the voxel size -- simple and robust; this is where an exact DDA traversal would
+	 * go for a faster / leak-free integrator.
+	 */
+	template <class Map, class T, class... Rest>
+	std::vector<detail::Miss<Dim>> buildMisses(Map const&                         map,
+	                                           PointCloud<Dim, T, Rest...> const& cloud,
+	                                           Vec<Dim, float> const& sensor_origin) const
+	{
+		std::vector<detail::Miss<Dim>> misses;
+
+		if constexpr (Map::hasMapTypes(MapType::OCCUPANCY)) {
+			using Vecf        = Vec<Dim, float>;
+			using Code        = TreeCode<Dim>;
+			float const voxel = static_cast<float>(map.length(miss_depth)[0]);
+			if (!(voxel > 0.0f)) {
+				return misses;
+			}
+
+			auto points = cloud.template view<0>();
+
+			// Voxels that contain a measured point must never be carved as free.
+			std::unordered_set<Code> occupied_cells;
+			for (auto const& p : points) {
+				occupied_cells.insert(map.code(TreeCoord(Vecf(p), miss_depth)));
+			}
+
+			std::unordered_map<Code, std::uint_fast32_t> miss_count;
+			for (auto const& p : points) {
+				Vecf const  ray  = Vecf(p) - sensor_origin;
+				float const dist = norm(ray);
+				if (!std::isfinite(dist) || dist <= voxel) {
+					continue;
+				}
+				Vecf const dir   = ray / dist;
+				auto const steps = static_cast<long>((dist - 0.5f * voxel) / voxel);
+				for (long s = 1; s <= steps; ++s) {
+					Vecf const sample = sensor_origin + dir * (static_cast<float>(s) * voxel);
+					Code const code   = map.code(TreeCoord(sample, miss_depth));
+					if (occupied_cells.find(code) == occupied_cells.end()) {
+						++miss_count[code];
+					}
+				}
+			}
+
+			misses.reserve(miss_count.size());
+			for (auto const& [code, count] : miss_count) {
+				misses.emplace_back(code, Vecf{}, count, false);
+			}
+		}
+
+		return misses;
+	}
 
 	template <class Map>
 	void insertMiss(Map& map, detail::Miss<Dim> const& miss, logit_t occupancy,
