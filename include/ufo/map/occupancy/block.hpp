@@ -48,6 +48,7 @@
 // STL
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 
 namespace ufo
@@ -85,6 +86,26 @@ struct OccupancyElement {
 		return !(lhs == rhs);
 	};
 };
+
+/*!
+ * @brief Convert an occupancy probability in [0, 1] to a logit (log-odds) value.
+ */
+[[nodiscard]] inline OccupancyElement::logit_t probabilityToLogit(
+    OccupancyElement::logit_t probability) noexcept
+{
+	using logit_t = OccupancyElement::logit_t;
+	return std::log(probability / (logit_t(1) - probability));
+}
+
+/*!
+ * @brief Convert a logit (log-odds) value to an occupancy probability in [0, 1].
+ */
+[[nodiscard]] inline OccupancyElement::logit_t logitToProbability(
+    OccupancyElement::logit_t logit) noexcept
+{
+	using logit_t = OccupancyElement::logit_t;
+	return logit_t(1) / (logit_t(1) + std::exp(-logit));
+}
 
 template <std::size_t BF>
 struct OccupancyBlock {

@@ -58,6 +58,7 @@
 #include <ufo/utility/type_traits.hpp>
 
 // STL
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <string_view>
@@ -128,6 +129,26 @@ class OccupancyMap
 	[[nodiscard]] occupancy_t occupancy(NodeType node) const
 	{
 		return occupancy(occupancyLogit(node));
+	}
+
+	//
+	// Logit (log-odds) <-> probability conversion
+	//
+
+	/*!
+	 * @brief Convert a logit (log-odds) value to an occupancy probability in [0, 1].
+	 */
+	[[nodiscard]] occupancy_t occupancy(logit_t logit) const noexcept
+	{
+		return logitToProbability(logit);
+	}
+
+	/*!
+	 * @brief Convert an occupancy probability in [0, 1] to a logit (log-odds) value.
+	 */
+	[[nodiscard]] logit_t occupancyLogit(occupancy_t probability) const noexcept
+	{
+		return probabilityToLogit(probability);
 	}
 
 	/**************************************************************************************
@@ -334,7 +355,7 @@ class OccupancyMap
 	// Sensor model
 	//
 
-	[[nodiscard]] constexpr occupancy_t occupiedThres() const noexcept
+	[[nodiscard]] occupancy_t occupiedThres() const noexcept
 	{
 		return occupancy(occupiedThresLogit());
 	}
@@ -344,7 +365,7 @@ class OccupancyMap
 		return occupied_thres_logit_;
 	}
 
-	[[nodiscard]] constexpr occupancy_t freeThres() const noexcept
+	[[nodiscard]] occupancy_t freeThres() const noexcept
 	{
 		return occupancy(freeThresLogit());
 	}
@@ -411,7 +432,7 @@ class OccupancyMap
 		derived().setModified();
 
 		if (propagate) {
-			derived().propagateModified();
+			derived().propagate();
 		}
 	}
 
@@ -421,6 +442,7 @@ class OccupancyMap
 	|                                                                                     |
 	**************************************************************************************/
 
+#if defined(UFO_WEBGPU)
 	[[nodiscard]] WGPUBuffer gpuOccupancyBuffer() const
 	{
 		return derived().template gpuBuffer<Block>();
@@ -430,6 +452,7 @@ class OccupancyMap
 	{
 		return derived().template gpuBufferSize<Block>();
 	}
+#endif  // UFO_WEBGPU
 
  protected:
 	/**************************************************************************************
