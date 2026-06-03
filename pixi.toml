@@ -1,0 +1,30 @@
+[workspace]
+name = "ufomap-smoke"
+version = "0.1.0"
+description = "Minimal, reproducible environment to build & run the UFOMap v2 (Map) smoke tests, CPU-only (no GPU/WebGPU)."
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+# Toolchain
+cxx-compiler = ">=1.7"
+cmake = ">=3.24"
+ninja = ">=1.11"
+# Test framework
+catch2 = ">=3.4"
+# libstdc++'s <execution> (used by ufoexecution) needs the TBB backend to link
+tbb-devel = ">=2021"
+# Requested for upcoming compression support (UFO::Compression is currently disabled)
+lz4-c = ">=1.9"
+
+[tasks]
+# Configure the standalone smoke superbuild (fetches the pinned UFO sibling deps).
+configure = "cmake -G Ninja -S smoke -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo"
+# Build the smoke-test executables.
+build = "cmake --build build"
+# Run the smoke tests.
+test = "ctest --test-dir build --output-on-failure"
+# One-shot: configure + build + test.
+smoke = "cmake -G Ninja -S smoke -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build build && ctest --test-dir build --output-on-failure"
+# Remove the build directory.
+clean = "rm -rf build"

@@ -61,3 +61,6 @@ coverage_report/*
 
 # Ply files
 *.ply
+
+# pixi (installed environments; pixi.lock is intentionally tracked)
+.pixi/
